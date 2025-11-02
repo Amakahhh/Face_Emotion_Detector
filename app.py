@@ -11,10 +11,32 @@ import sqlite3
 import numpy as np
 from PIL import Image
 import cv2
+import tensorflow as tf
 from tensorflow import keras
 from datetime import datetime
 import base64
 import io
+
+# Configure TensorFlow to use minimal memory for Render free tier
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow warnings
+# Disable GPU if available to save memory on free tier
+try:
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            print(f"GPU configuration error: {e}")
+except Exception as e:
+    print(f"GPU check failed: {e}")
+
+# Limit TensorFlow to use only necessary memory and threads
+try:
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(1)
+except Exception as e:
+    print(f"Threading config error: {e}")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -46,13 +68,17 @@ EMOTION_MESSAGES = {
     'Neutral': "You have a neutral expression. How are you feeling?"
 }
 
-# Load the trained model
+# Load the trained model with memory optimization
 print("Loading emotion recognition model...")
 model = None
 try:
     model_path = 'face_emotionModel.h5'
     if os.path.exists(model_path):
-        model = keras.models.load_model(model_path)
+        # Load model with custom object scope to minimize memory
+        with tf.device('/CPU:0'):  # Use CPU to avoid GPU memory issues on free tier
+            model = keras.models.load_model(model_path, compile=False)
+            # Compile model with minimal settings
+            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
         print("Model loaded successfully!")
     else:
         print(f"Warning: Model file '{model_path}' not found. Emotion detection will not work.")
@@ -93,6 +119,7 @@ def detect_emotion(image_path):
     """
     Detect emotion from an image file.
     Preprocesses the image and uses the trained model for prediction.
+    Optimized for Render free tier with minimal memory usage.
     """
     if model is None:
         return None, "Model not loaded. Please train the model first."
@@ -113,18 +140,31 @@ def detect_emotion(image_path):
         # Reshape for model input: (1, 48, 48, 1)
         img = img.reshape(1, 48, 48, 1)
         
-        # Predict emotion with timeout handling
-        # Use predict with minimal overhead for Render free tier
+        # Predict emotion with CPU device and minimal memory
+        # Use predict_on_batch for better memory efficiency
         try:
-            predictions = model.predict(img, verbose=0, batch_size=1)
-            emotion_idx = np.argmax(predictions[0])
-            confidence = float(predictions[0][emotion_idx])
-            emotion = EMOTION_LABELS[emotion_idx]
+            with tf.device('/CPU:0'):  # Force CPU usage to avoid GPU memory issues
+                # Use predict_on_batch for single prediction - more memory efficient
+                predictions = model.predict_on_batch(img)
+                emotion_idx = np.argmax(predictions[0])
+                confidence = float(predictions[0][emotion_idx])
+                emotion = EMOTION_LABELS[emotion_idx]
             
             return emotion, confidence
         except Exception as pred_error:
             print(f"Prediction error: {pred_error}")
-            return None, f"Error during prediction: {str(pred_error)}"
+            import traceback
+            print(traceback.format_exc())
+            # Try alternative prediction method
+            try:
+                with tf.device('/CPU:0'):
+                    predictions = model(img, training=False).numpy()
+                    emotion_idx = np.argmax(predictions[0])
+                    confidence = float(predictions[0][emotion_idx])
+                    emotion = EMOTION_LABELS[emotion_idx]
+                return emotion, confidence
+            except Exception as alt_error:
+                return None, f"Error during prediction: {str(pred_error)}"
         
     except Exception as e:
         import traceback
