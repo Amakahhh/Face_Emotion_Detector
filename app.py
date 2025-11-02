@@ -48,11 +48,19 @@ EMOTION_MESSAGES = {
 
 # Load the trained model
 print("Loading emotion recognition model...")
+model = None
 try:
-    model = keras.models.load_model('face_emotionModel.h5')
-    print("Model loaded successfully!")
+    model_path = 'face_emotionModel.h5'
+    if os.path.exists(model_path):
+        model = keras.models.load_model(model_path)
+        print("Model loaded successfully!")
+    else:
+        print(f"Warning: Model file '{model_path}' not found. Emotion detection will not work.")
+        print("Please ensure face_emotionModel.h5 is in the project root directory.")
 except Exception as e:
     print(f"Error loading model: {e}")
+    import traceback
+    print(traceback.format_exc())
     print("Please train the model first using model_training.py")
     model = None
 
@@ -144,10 +152,14 @@ def index():
 def submit():
     """Handle form submission"""
     try:
+        print("Form submission received")  # Debug log
+        
         # Get form data
         name = request.form.get('name', '').strip()
         email = request.form.get('email', '').strip()
         student_id = request.form.get('student_id', '').strip()
+        
+        print(f"Form data - Name: {name}, Email: {email}")  # Debug log
         
         # Validate required fields
         if not name or not email:
@@ -156,22 +168,26 @@ def submit():
         
         # Check if image file is present
         if 'image' not in request.files:
+            print("No image file in request")  # Debug log
             flash('Please upload an image.', 'error')
             return redirect(url_for('index'))
         
         file = request.files['image']
         
         if file.filename == '':
+            print("Empty filename")  # Debug log
             flash('Please select an image file.', 'error')
             return redirect(url_for('index'))
         
         if not allowed_file(file.filename):
+            print(f"Invalid file type: {file.filename}")  # Debug log
             flash('Invalid file type. Please upload a valid image (PNG, JPG, JPEG, GIF, BMP).', 'error')
             return redirect(url_for('index'))
         
         # Create uploads directory if it doesn't exist
         if not os.path.exists(app.config['UPLOAD_FOLDER']):
             os.makedirs(app.config['UPLOAD_FOLDER'])
+            print(f"Created uploads directory: {app.config['UPLOAD_FOLDER']}")
         
         # Save uploaded file
         filename = secure_filename(file.filename)
@@ -179,16 +195,29 @@ def submit():
         unique_filename = f"{timestamp}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
         file.save(filepath)
+        print(f"File saved to: {filepath}")  # Debug log
         
         # Detect emotion
+        print("Starting emotion detection...")  # Debug log
         emotion, confidence = detect_emotion(filepath)
         
         if emotion is None:
+            print(f"Emotion detection failed: {confidence}")  # Debug log
             flash(f'Error detecting emotion: {confidence}', 'error')
+            # Clean up uploaded file
+            if os.path.exists(filepath):
+                os.remove(filepath)
             return redirect(url_for('index'))
         
+        print(f"Emotion detected: {emotion} with confidence: {confidence}")  # Debug log
+        
         # Save to database
-        save_to_database(name, email, student_id, emotion, filepath)
+        try:
+            save_to_database(name, email, student_id, emotion, filepath)
+            print("Data saved to database")  # Debug log
+        except Exception as db_error:
+            print(f"Database error: {db_error}")  # Debug log
+            # Continue even if database save fails
         
         # Get emotion message
         message = EMOTION_MESSAGES.get(emotion, f"You look {emotion.lower()}.")
@@ -204,17 +233,21 @@ def submit():
                              name=name)
         
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in submit: {str(e)}")  # Debug log
+        print(f"Traceback: {error_trace}")  # Debug log
         flash(f'An error occurred: {str(e)}', 'error')
         return redirect(url_for('index'))
 
+# Initialize database and uploads directory on app startup
+# This runs when the module is imported (works with gunicorn)
+init_database()
+if not os.path.exists(app.config['UPLOAD_FOLDER']):
+    os.makedirs(app.config['UPLOAD_FOLDER'])
+    print(f"Created uploads directory: {app.config['UPLOAD_FOLDER']}")
+
 if __name__ == '__main__':
-    # Initialize database on startup
-    init_database()
-    
-    # Create uploads directory if it doesn't exist
-    if not os.path.exists(app.config['UPLOAD_FOLDER']):
-        os.makedirs(app.config['UPLOAD_FOLDER'])
-    
     print("\n" + "=" * 60)
     print("Facial Emotion Recognition Web App")
     print("=" * 60)

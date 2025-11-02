@@ -222,8 +222,52 @@
                 <p class="file-info">Accepted formats: PNG, JPG, JPEG, GIF, BMP (Max 16MB)</p>
             </div>
             
-            <button type="submit" class="btn-submit">Detect Emotion</button>
+            <button type="submit" class="btn-submit" id="submitBtn">Detect Emotion</button>
         </form>
     </div>
+    
+    <script>
+        // Handle form submission with loading state
+        document.querySelector('form').addEventListener('submit', function(e) {
+            const submitBtn = document.getElementById('submitBtn');
+            const form = this;
+            
+            // Validate file is selected
+            const fileInput = document.getElementById('image');
+            if (!fileInput.files || fileInput.files.length === 0) {
+                e.preventDefault();
+                alert('Please select an image file.');
+                return false;
+            }
+            
+            // Validate required fields
+            const name = document.getElementById('name').value.trim();
+            const email = document.getElementById('email').value.trim();
+            
+            if (!name || !email) {
+                e.preventDefault();
+                alert('Please fill in all required fields (Name and Email).');
+                return false;
+            }
+            
+            // Show loading state
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Processing... Please wait';
+            submitBtn.style.opacity = '0.7';
+            submitBtn.style.cursor = 'not-allowed';
+            
+            // Allow form to submit
+            return true;
+        });
+        
+        // Reset button state if page reloads (for errors)
+        window.addEventListener('load', function() {
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Detect Emotion';
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+        });
+    </script>
 </body>
 </html>
