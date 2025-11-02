@@ -78,8 +78,6 @@ def init_database():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            student_id TEXT,
             submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             emotion_detected TEXT,
             image_path TEXT,
@@ -103,6 +101,9 @@ def detect_emotion(image_path):
         # Load and preprocess image
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         
+        if img is None:
+            return None, "Could not load image. Please ensure the file is a valid image."
+        
         # Resize to 48x48 (model input size)
         img = cv2.resize(img, (48, 48))
         
@@ -112,18 +113,26 @@ def detect_emotion(image_path):
         # Reshape for model input: (1, 48, 48, 1)
         img = img.reshape(1, 48, 48, 1)
         
-        # Predict emotion
-        predictions = model.predict(img, verbose=0)
-        emotion_idx = np.argmax(predictions[0])
-        confidence = float(predictions[0][emotion_idx])
-        emotion = EMOTION_LABELS[emotion_idx]
-        
-        return emotion, confidence
+        # Predict emotion with timeout handling
+        # Use predict with minimal overhead for Render free tier
+        try:
+            predictions = model.predict(img, verbose=0, batch_size=1)
+            emotion_idx = np.argmax(predictions[0])
+            confidence = float(predictions[0][emotion_idx])
+            emotion = EMOTION_LABELS[emotion_idx]
+            
+            return emotion, confidence
+        except Exception as pred_error:
+            print(f"Prediction error: {pred_error}")
+            return None, f"Error during prediction: {str(pred_error)}"
         
     except Exception as e:
+        import traceback
+        print(f"Error in detect_emotion: {str(e)}")
+        print(traceback.format_exc())
         return None, str(e)
 
-def save_to_database(name, email, student_id, emotion, image_path):
+def save_to_database(name, emotion, image_path):
     """Save user data and image to database"""
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -136,9 +145,9 @@ def save_to_database(name, email, student_id, emotion, image_path):
     
     # Insert into database
     cursor.execute('''
-        INSERT INTO users (name, email, student_id, emotion_detected, image_path, image_blob)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (name, email, student_id, emotion, image_path, image_blob))
+        INSERT INTO users (name, emotion_detected, image_path, image_blob)
+        VALUES (?, ?, ?, ?)
+    ''', (name, emotion, image_path, image_blob))
     
     conn.commit()
     conn.close()
@@ -156,14 +165,12 @@ def submit():
         
         # Get form data
         name = request.form.get('name', '').strip()
-        email = request.form.get('email', '').strip()
-        student_id = request.form.get('student_id', '').strip()
         
-        print(f"Form data - Name: {name}, Email: {email}")  # Debug log
+        print(f"Form data - Name: {name}")  # Debug log
         
         # Validate required fields
-        if not name or not email:
-            flash('Please fill in all required fields (Name and Email).', 'error')
+        if not name:
+            flash('Please enter your name.', 'error')
             return redirect(url_for('index'))
         
         # Check if image file is present
@@ -205,15 +212,18 @@ def submit():
             print(f"Emotion detection failed: {confidence}")  # Debug log
             flash(f'Error detecting emotion: {confidence}', 'error')
             # Clean up uploaded file
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except:
+                pass
             return redirect(url_for('index'))
         
         print(f"Emotion detected: {emotion} with confidence: {confidence}")  # Debug log
         
         # Save to database
         try:
-            save_to_database(name, email, student_id, emotion, filepath)
+            save_to_database(name, emotion, filepath)
             print("Data saved to database")  # Debug log
         except Exception as db_error:
             print(f"Database error: {db_error}")  # Debug log
