@@ -75,10 +75,9 @@ try:
     model_path = 'face_emotionModel.h5'
     if os.path.exists(model_path):
         # Load model with custom object scope to minimize memory
+        # Don't compile on load - we only need inference, not training
         with tf.device('/CPU:0'):  # Use CPU to avoid GPU memory issues on free tier
             model = keras.models.load_model(model_path, compile=False)
-            # Compile model with minimal settings
-            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
         print("Model loaded successfully!")
     else:
         print(f"Warning: Model file '{model_path}' not found. Emotion detection will not work.")
@@ -196,6 +195,11 @@ def save_to_database(name, emotion, image_path):
 def index():
     """Render the main form page"""
     return render_template('index.html')
+
+@app.route('/health')
+def health():
+    """Health check endpoint to keep service alive"""
+    return {'status': 'healthy', 'model_loaded': model is not None}, 200
 
 @app.route('/submit', methods=['POST'])
 def submit():
